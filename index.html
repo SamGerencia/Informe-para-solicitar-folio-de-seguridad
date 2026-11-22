@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Informe para solicitar folio de seguridad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  pino: { 950:'#04261a', 900:'#063d29', 800:'#0a5236', 700:'#0d6b45' },
+  esmeralda: { 600:'#059669', 500:'#10b981', 100:'#d1fae5', 50:'#ecfdf5' }
+}}}};
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  body { font-family: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+  .no-select { user-select: none; -webkit-user-select: none; pointer-events: none; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; } .scroll-thin::-webkit-scrollbar-thumb { background:#a7f3d0; border-radius: 6px; }
+  input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+</style>
+</head>
+<body class="bg-white min-h-screen">
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useRef, useEffect } = React;
+
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycbzgYmcpFIbLC6-t3NzSyQ9rINrfZj1N35cIvgMviTQE__IaFD10mxc4nYWwSLu30Fp0/exec";
+
+const LINEAS = ["ABC","AVEC","CONEXIÓN","ELITE","ESTE","FILIALES","FUTURA","GOLFO","NAYARIT","NORESTE","NORESTE-ESTE","NORTE","ORIENTE","PACÍFICO CENTRO","PACÍFICO SUR","VALLE DE GUADIANA"];
+const TIPOS = ["Choque alcance","Choque lateral","Choque frontal","Choque objeto fijo","Volcadura","Salida de camino","Atropellamiento"];
+const OTRO = "__otro__";
+const PAX = [
+  { key:"sinLesiones", label:"Sin lesiones", on:"bg-esmeralda-600 border-esmeralda-600 text-white" },
+  { key:"lesionados",  label:"Lesionados",   on:"bg-amber-500 border-amber-500 text-white" },
+  { key:"finados",     label:"Finados",      on:"bg-gray-800 border-gray-800 text-white" },
+];
+const ESTADOS_OP = [
+  { v:"Sin lesiones", on:"bg-esmeralda-600 text-white" },
+  { v:"Lesionado",    on:"bg-amber-500 text-white" },
+  { v:"Finado",       on:"bg-gray-800 text-white" },
+];
+const MAX_FOTOS = 3;
+// Valida "19.432608, -99.133209" (también acepta espacios o ; como separador)
+const leerCoords = (s) => {
+  s = String(s).trim();
+  // Enlaces de Google Maps: ...?q=19.43,-99.13  ...@19.43,-99.13,17z  ...!3d19.43!4d-99.13
+  const enlace = s.match(/[?&](?:q|query|ll|destination)=(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/) || s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || s.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  if (enlace) s = enlace[1] + "," + enlace[2];
+  const m = s.match(/^(-?\d{1,2}(?:\.\d+)?)\s*[,; ]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng, txt: `${lat.toFixed(6)}, ${lng.toFixed(6)}` };
+};
+// Reduce la foto a máx. 1600 px y JPEG para que pese poco al enviarla
+const prepararFoto = (archivo) => new Promise((ok, mal) => {
+  const url = URL.createObjectURL(archivo);
+  const img = new Image();
+  img.onload = () => {
+    const esc = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.width * esc); c.height = Math.round(img.height * esc);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    c.toBlob(b => {
+      if (!b) return mal(new Error("No se pudo procesar"));
+      const lector = new FileReader();
+      lector.onload = () => ok({ id: Math.random().toString(36).slice(2), blob: b, url: URL.createObjectURL(b), base64: String(lector.result).split(",")[1] });
+      lector.readAsDataURL(b);
+    }, "image/jpeg", 0.8);
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); mal(new Error("Formato no compatible")); };
+  img.src = url;
+});
+const pad = n => String(n).padStart(2,"0");
+const MINUTOS_DIA = Array.from({length:1440}, (_,i) => `${pad(Math.floor(i/60))}:${pad(i%60)}`);
+const HORAS = Array.from({length:24}, (_,i)=>pad(i));
+const MINS = Array.from({length:60}, (_,i)=>pad(i));
+const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+const DIAS = ["Lu","Ma","Mi","Ju","Vi","Sá","Do"];
+
+const INICIAL = {
+  eco:"", linea:"", lineaOtro:"", operador:"", conOperador2:false, operador2:"", horario:"", corrida:"",
+  tipo:"", tipoOtro:"", estOp1:"", estOp2:"", paxTotal:"", pax:{ sinLesiones:null, lesionados:null, finados:null },
+  fecha:null, hora:"", minuto:"", ubicacion:"", coordenadas:"", observaciones:""
+};
+
+const inputCls = "w-full rounded-xl border border-esmeralda-100 bg-white px-3.5 py-3 text-[15px] text-gray-900 placeholder-gray-400 shadow-sm focus:border-esmeralda-500 focus:outline-none focus:ring-2 focus:ring-esmeralda-500/30";
+
+const ErroresCtx = React.createContext({});
+
+function Campo({ n, label, children }) {
+  const errores = React.useContext(ErroresCtx);
+  const msj = errores[n];
+  return (
+    <div id={"campo-" + n} className={"space-y-1.5 rounded-2xl transition " + (msj ? "-m-2 bg-red-50 p-2 ring-2 ring-red-400" : "")}>
+      <label className="flex items-center gap-2 text-[13px] font-semibold text-pino-900">
+        <span className={"grid h-5 w-5 place-items-center rounded-full text-[11px] text-white " + (msj ? "bg-red-500" : "bg-pino-800")}>{n}</span>{label}
+      </label>
+      {children}
+      {msj && <p className="flex items-center gap-1 text-xs font-semibold text-red-600">⚠ {msj}</p>}
+    </div>
+  );
+}
+
+function Select({ value, onChange, children, placeholder }) {
+  return (
+    <div className="relative">
+      <select value={value} onChange={e=>onChange(e.target.value)} className={inputCls + " appearance-none pr-9 " + (value ? "" : "text-gray-400")}>
+        <option value="" disabled>{placeholder}</option>
+        {children}
+      </select>
+      <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pino-700" viewBox="0 0 20 20" fill="currentColor"><path d="M5.3 7.3a1 1 0 011.4 0L10 10.6l3.3-3.3a1 1 0 111.4 1.4l-4 4a1 1 0 01-1.4 0l-4-4a1 1 0 010-1.4z"/></svg>
+    </div>
+  );
+}
+
+/* Buscador de los 1,440 minutos del día */
+function BuscadorHora({ value, onChange }) {
+  const [abierto, setAbierto] = useState(false);
+  const [texto, setTexto] = useState(value);
+  useEffect(()=>{ setTexto(value); }, [value]);
+  const filtro = texto.replace(/[^0-9:]/g,"");
+  const lista = useMemo(()=>{
+    if (!filtro) return MINUTOS_DIA;
+    const d = filtro.replace(/:/g,"");
+    const norm = d.length <= 2 ? d : d.slice(0,2) + ":" + d.slice(2);
+    return MINUTOS_DIA.filter(m => m.startsWith(norm));
+  }, [filtro]);
+  const elegir = m => { onChange(m); setTexto(m); setAbierto(false); };
+  return (
+    <div className="relative">
+      <input
+        inputMode="numeric" placeholder="HH:MM" value={texto} maxLength={5}
+        onFocus={()=>setAbierto(true)}
+        onBlur={()=>setTimeout(()=>{ setAbierto(false); setTexto(value); }, 150)}
+        onChange={e=>{ setTexto(e.target.value); setAbierto(true); }}
+        onKeyDown={e=>{ if (e.key==="Enter" && lista.length) { e.preventDefault(); elegir(lista[0]); } }}
+        className={inputCls + " font-mono tracking-wider"}
+      />
+      {abierto && (
+        <ul className="scroll-thin absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-esmeralda-100 bg-white py-1 shadow-xl">
+          {lista.length === 0 && <li className="px-3 py-2 text-sm text-gray-400">Sin coincidencias</li>}
+          {lista.slice(0, 120).map(m => (
+            <li key={m} onMouseDown={e=>{ e.preventDefault(); elegir(m); }}
+                className={"cursor-pointer px-3 py-2 font-mono text-[15px] hover:bg-esmeralda-50 " + (m===value ? "bg-esmeralda-100 font-bold text-pino-900" : "text-gray-800")}>{m}</li>
+          ))}
+          {lista.length > 120 && <li className="px-3 py-2 text-xs text-gray-400">Escribe la hora para filtrar ({lista.length} resultados)</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* Calendario visual */
+function Calendario({ value, onChange }) {
+  const hoy = new Date();
+  const base = value || hoy;
+  const [mes, setMes] = useState(base.getMonth());
+  const [anio, setAnio] = useState(base.getFullYear());
+  useEffect(()=>{ if (value) { setMes(value.getMonth()); setAnio(value.getFullYear()); } }, [value]);
+  const primero = (new Date(anio, mes, 1).getDay() + 6) % 7;
+  const total = new Date(anio, mes + 1, 0).getDate();
+  const celdas = [...Array(primero).fill(null), ...Array.from({length: total}, (_,i)=>i+1)];
+  const mover = d => { let m = mes + d, a = anio; if (m < 0) { m = 11; a--; } if (m > 11) { m = 0; a++; } setMes(m); setAnio(a); };
+  const igual = (d) => value && value.getDate()===d && value.getMonth()===mes && value.getFullYear()===anio;
+  const esHoy = (d) => hoy.getDate()===d && hoy.getMonth()===mes && hoy.getFullYear()===anio;
+  return (
+    <div className="rounded-xl border border-esmeralda-100 bg-white p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between">
+        <button type="button" onClick={()=>mover(-1)} className="grid h-8 w-8 place-items-center rounded-lg text-pino-800 hover:bg-esmeralda-50">‹</button>
+        <span className="text-sm font-bold text-pino-900">{MESES[mes]} {anio}</span>
+        <button type="button" onClick={()=>mover(1)} className="grid h-8 w-8 place-items-center rounded-lg text-pino-800 hover:bg-esmeralda-50">›</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center">
+        {DIAS.map(d => <div key={d} className="py-1 text-[11px] font-semibold uppercase text-gray-400">{d}</div>)}
+        {celdas.map((d,i) => d === null ? <div key={"v"+i}/> : (
+          <button type="button" key={i} onClick={()=>onChange(new Date(anio, mes, d))}
+            className={"h-9 rounded-lg text-sm transition " + (igual(d) ? "bg-pino-800 font-bold text-white shadow" : esHoy(d) ? "border border-esmeralda-500 text-pino-900" : "text-gray-700 hover:bg-esmeralda-50")}>{d}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* Campo de fecha que despliega el calendario solo al tocarlo */
+function SelectorFecha({ value, onChange }) {
+  const [abierto, setAbierto] = useState(false);
+  const ref = useRef(null);
+  useEffect(()=>{
+    if (!abierto) return;
+    const cerrar = e => { if (ref.current && !ref.current.contains(e.target)) setAbierto(false); };
+    document.addEventListener("pointerdown", cerrar);
+    return () => document.removeEventListener("pointerdown", cerrar);
+  }, [abierto]);
+  const txt = value ? `${pad(value.getDate())}/${pad(value.getMonth()+1)}/${value.getFullYear()}` : "";
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={()=>setAbierto(a=>!a)}
+        className={inputCls + " flex items-center justify-between text-left " + (abierto ? "border-esmeralda-500 ring-2 ring-esmeralda-500/30" : "")}>
+        <span className={txt ? "text-gray-900" : "text-gray-400"}>{txt || "Selecciona la fecha"}</span>
+        <svg className="h-5 w-5 text-pino-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+      </button>
+      {abierto && (
+        <div className="absolute z-40 mt-1 w-full shadow-2xl">
+          <Calendario value={value} onChange={d=>{ onChange(d); setAbierto(false); }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App() {
+  const [f, setF] = useState(INICIAL);
+  const [aviso, setAviso] = useState(null);
+  const [enviando, setEnviando] = useState(false);
+  const [guardado, setGuardado] = useState(false);
+  const [fotos, setFotos] = useState([]);
+  const [procesandoFotos, setProcesandoFotos] = useState(false);
+  const [buscandoGps, setBuscandoGps] = useState(false);
+  const entradaFotos = useRef(null);
+  const candado = useRef(false); // bloqueo inmediato contra doble toque
+  const [confirmar, setConfirmar] = useState(false);
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const notificar = (tipo, texto) => { setAviso({ tipo, texto }); clearTimeout(window.__t); window.__t = setTimeout(()=>setAviso(null), 3800); };
+
+  const linea = f.linea === OTRO ? f.lineaOtro.trim() : f.linea;
+  const tipo = f.tipo === OTRO ? f.tipoOtro.trim() : f.tipo;
+  const paxDetalle = PAX.filter(p => f.pax[p.key] !== null).map(p => `${p.label}: ${f.pax[p.key] === "" ? "—" : f.pax[p.key]}`).join(", ");
+  const paxTxt = [f.paxTotal !== "" && `Total: ${f.paxTotal}`, paxDetalle].filter(Boolean).join(" | ");
+  const estOpTxt = [f.estOp1 && `Operador1: ${f.estOp1}`, f.conOperador2 && f.estOp2 && `Operador2: ${f.estOp2}`].filter(Boolean).join(" | ");
+  const sumaPax = PAX.reduce((s,p) => s + (parseInt(f.pax[p.key]) || 0), 0);
+  const opsActivos = [
+    (f.operador.trim() || f.estOp1) ? f.estOp1 || "sin estado" : null,
+    f.conOperador2 ? (f.estOp2 || "sin estado") : null
+  ].filter(Boolean);
+  const basePax = f.paxTotal !== "" ? parseInt(f.paxTotal) : sumaPax;
+  const totalPersonas = basePax + opsActivos.length;
+  const porEstado = [
+    ["Sin lesiones", (parseInt(f.pax.sinLesiones)||0) + opsActivos.filter(e=>e==="Sin lesiones").length],
+    ["Lesionados",   (parseInt(f.pax.lesionados)||0)  + opsActivos.filter(e=>e==="Lesionado").length],
+    ["Finados",      (parseInt(f.pax.finados)||0)     + opsActivos.filter(e=>e==="Finado").length],
+  ];
+  const hayResumen = basePax > 0 || f.estOp1 || (f.conOperador2 && f.estOp2);
+  const totalTxt = hayResumen
+    ? `${totalPersonas} (${basePax} ${basePax===1?"pasajero":"pasajeros"} + ${opsActivos.length} ${opsActivos.length===1?"operador":"operadores"})` +
+      (porEstado.some(([,n])=>n>0) ? " | " + porEstado.filter(([,n])=>n>0).map(([l,n])=>`${l}: ${n}`).join(", ") : "")
+    : "";
+  const hayDetalle = PAX.some(p => f.pax[p.key] !== null && f.pax[p.key] !== "");
+  const fechaTxt = f.fecha ? `${pad(f.fecha.getDate())}/${pad(f.fecha.getMonth()+1)}/${f.fecha.getFullYear()}` : "";
+  const horaTxt = f.hora && f.minuto ? `${f.hora}:${f.minuto}` : (f.hora || f.minuto ? `${f.hora||"--"}:${f.minuto||"--"}` : "");
+  const fechaHora = [fechaTxt, horaTxt && `${horaTxt} hrs`].filter(Boolean).join(" ");
+  const horarioCorrida = [f.horario && `${f.horario} hrs`, f.corrida.trim()].filter(Boolean).join(" ");
+
+  const coordsOk = leerCoords(f.coordenadas);
+  const filas = [
+    ["Eco:", f.eco.trim()],
+    ["Línea:", linea],
+    ["Operador1:", f.operador.trim()],
+    ...(f.conOperador2 ? [["Operador2:", f.operador2.trim()]] : []),
+    ["Horario y Corrida:", horarioCorrida],
+    ["Tipo de Accidente:", tipo],
+    ["Pasajeros:", paxTxt],
+    ...(estOpTxt ? [["Estado de operadores:", estOpTxt]] : []),
+    ...(totalTxt ? [["Total de personas:", totalTxt]] : []),
+    ["Fecha y Hora del Accidente:", fechaHora],
+    ["Ubicación:", f.ubicacion.trim()],
+    ...(coordsOk ? [["Coordenadas:", `${coordsOk.txt} https://maps.google.com/?q=${coordsOk.lat},${coordsOk.lng}`]] : []),
+    ["Observaciones:", f.observaciones.trim()],
+    ...(fotos.length ? [["Fotografías:", `${fotos.length} adjunta${fotos.length > 1 ? "s" : ""}`]] : []),
+  ];
+
+  const textoWhatsApp = () =>
+    "*Informe para solicitar folio de seguridad*\n\n" + filas.map(([l, v]) => `*${l}* ${v}`).join("\n");
+
+  const [intento, setIntento] = useState(false);
+  const faltantes = {};
+  if (!f.eco.trim()) faltantes["1"] = "Captura el número Eco";
+  if (!linea) faltantes["2"] = f.linea === OTRO ? "Especifica la línea" : "Selecciona la línea";
+  {
+    const m = [];
+    if (!f.operador.trim()) m.push("el nombre del Operador1");
+    if (f.conOperador2 && !f.operador2.trim()) m.push("el nombre del Operador2 (o quítalo si no hubo)");
+    if (m.length) faltantes["3"] = "Falta " + m.join(" y ");
+  }
+  if (!f.horario || !f.corrida.trim()) faltantes["4"] = !f.horario && !f.corrida.trim() ? "Falta el horario y la corrida" : !f.horario ? "Falta el horario" : "Falta la corrida (origen - destino)";
+  if (!tipo) faltantes["5"] = f.tipo === OTRO ? "Especifica el tipo de accidente" : "Selecciona el tipo de accidente";
+  {
+    const m = [];
+    if (f.paxTotal === "") m.push("el total de pasajeros");
+    if (!PAX.some(p => f.pax[p.key] !== null)) m.push("marcar al menos una categoría");
+    PAX.forEach(p => { if (f.pax[p.key] === "") m.push(`la cantidad de "${p.label}"`); });
+    if (!f.estOp1) m.push("el estado del Operador1");
+    if (f.conOperador2 && !f.estOp2) m.push("el estado del Operador2");
+    if (m.length) faltantes["6"] = "Falta " + m.join(", ");
+  }
+  if (!f.fecha || !f.hora || !f.minuto) faltantes["7"] = !f.fecha ? "Selecciona la fecha del accidente" + (!f.hora || !f.minuto ? " y la hora" : "") : "Selecciona la hora y los minutos";
+  const coordsMal = f.coordenadas.trim() && !coordsOk;
+  if (!f.ubicacion.trim() || coordsMal) faltantes["8"] =
+    !f.ubicacion.trim() ? "Falta la descripción de la ubicación" + (coordsMal ? " y corregir las coordenadas" : "")
+    : "Coordenadas no válidas. Pega latitud, longitud (19.432608, -99.133209) o borra el campo";
+  if (!f.observaciones.trim()) faltantes["9"] = "Escribe las observaciones";
+  const numFaltantes = Object.keys(faltantes).length;
+
+  const validar = () => {
+    if (numFaltantes === 0) return true;
+    setIntento(true);
+    notificar("error", numFaltantes === 1 ? "Falta 1 apartado por llenar." : `Faltan ${numFaltantes} apartados por llenar.`);
+    const primero = Object.keys(faltantes).sort((a,b)=>a-b)[0];
+    const el = document.getElementById("campo-" + primero);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    return false;
+  };
+
+  const [avisoGps, setAvisoGps] = useState(false);
+  const usarGps = () => {
+    if (!navigator.geolocation) { notificar("error", "Este navegador no permite obtener la ubicación. Escríbela a mano."); return; }
+    setBuscandoGps(true);
+    navigator.geolocation.getCurrentPosition(
+      pos => { set("coordenadas", `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`); setBuscandoGps(false); notificar("ok", "Coordenadas obtenidas del GPS."); },
+      err => { setBuscandoGps(false); notificar("error", err.code === 1 ? "Permiso de ubicación denegado. Actívalo o escríbelas a mano." : "No se pudo obtener la ubicación. Escríbela a mano."); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+  const agregarFotos = async (lista) => {
+    const archivos = Array.from(lista || []).filter(a => a.type.startsWith("image/") || /\.(jpe?g|png|heic|webp)$/i.test(a.name));
+    const libres = MAX_FOTOS - fotos.length;
+    if (!archivos.length) return;
+    if (archivos.length > libres) notificar("error", `Solo se permiten ${MAX_FOTOS} fotografías. Se agregaron las primeras ${libres}.`);
+    setProcesandoFotos(true);
+    const nuevas = [];
+    for (const a of archivos.slice(0, libres)) {
+      try { nuevas.push(await prepararFoto(a)); } catch { notificar("error", `No se pudo usar "${a.name}". Intenta con otra foto.`); }
+    }
+    setFotos(prev => [...prev, ...nuevas].slice(0, MAX_FOTOS));
+    setProcesandoFotos(false);
+    if (entradaFotos.current) entradaFotos.current.value = "";
+  };
+  const quitarFoto = id => setFotos(prev => { const p = prev.find(x => x.id === id); if (p) URL.revokeObjectURL(p.url); return prev.filter(x => x.id !== id); });
+
+  const compartir = async () => {
+    if (!validar()) return;
+    const t = textoWhatsApp();
+    if (fotos.length) {
+      const archivos = fotos.map((p, i) => new File([p.blob], `Eco_${f.eco.trim() || "SN"}_foto${i + 1}.jpg`, { type: "image/jpeg" }));
+      // Copia el texto por si la app destino solo recibe las fotos
+      try { await navigator.clipboard.writeText(t); } catch {}
+      if (navigator.canShare && navigator.canShare({ files: archivos })) {
+        try { await navigator.share({ files: archivos, text: t }); notificar("ok", "Si el texto no aparece en WhatsApp, pégalo: ya está copiado."); return; }
+        catch (e) { if (e && e.name === "AbortError") return; }
+      }
+      notificar("error", "Este navegador no puede enviar fotos directamente. El texto se copió; adjunta las fotos en WhatsApp.");
+    } else if (navigator.share) {
+      try { await navigator.share({ text: t }); return; }
+      catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    // Respaldo: abre WhatsApp directamente con el texto listo para elegir chat
+    const a = document.createElement("a");
+    a.href = "https://wa.me/?text=" + encodeURIComponent(t);
+    a.target = "_blank"; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
+  const copiar = async () => {
+    if (!validar()) return;
+    const t = textoWhatsApp();
+    try { await navigator.clipboard.writeText(t); notificar("ok", "Copiado. Pégalo en WhatsApp."); }
+    catch {
+      try {
+        const ta = document.createElement("textarea"); ta.value = t; ta.style.position="fixed"; ta.style.opacity="0";
+        document.body.appendChild(ta); ta.select(); const ok = document.execCommand("copy"); ta.remove();
+        if (!ok) throw 0; notificar("ok", "Copiado. Pégalo en WhatsApp.");
+      } catch { notificar("error", "No se pudo copiar automáticamente."); }
+    }
+  };
+
+  const guardar = async () => {
+    if (candado.current || guardado) { notificar("error", "Este informe ya se guardó. Limpia el formulario para capturar uno nuevo."); return; }
+    if (!validar()) return;
+    candado.current = true;
+    setEnviando(true);
+    const datos = {
+      eco: f.eco.trim(), linea, operador1: f.operador.trim(), operador2: f.conOperador2 ? f.operador2.trim() : "",
+      horario: f.horario, corrida: f.corrida.trim(), horarioCorrida,
+      tipoAccidente: tipo,
+      pasajerosSinLesiones: f.pax.sinLesiones ?? "", pasajerosLesionados: f.pax.lesionados ?? "", pasajerosFinados: f.pax.finados ?? "",
+      pasajerosTotal: f.paxTotal, estadoOperador1: f.estOp1, estadoOperador2: f.conOperador2 ? f.estOp2 : "", estadoOperadores: estOpTxt, totalPersonas: hayResumen ? totalPersonas : "", totalSinLesiones: porEstado[0][1], totalLesionados: porEstado[1][1], totalFinados: porEstado[2][1], totalPersonasTexto: totalTxt, pasajeros: paxTxt, fechaAccidente: fechaTxt, horaAccidente: horaTxt, fechaHoraAccidente: fechaHora,
+      ubicacion: f.ubicacion.trim(), coordenadas: coordsOk ? coordsOk.txt : "",
+      mapa: coordsOk ? `https://maps.google.com/?q=${coordsOk.lat},${coordsOk.lng}` : "",
+      observaciones: f.observaciones.trim(),
+      fotos: fotos.map((p, i) => ({ nombre: `Eco_${f.eco.trim() || "SN"}_foto${i + 1}.jpg`, tipo: "image/jpeg", datos: p.base64 })),
+      fechaRegistro: new Date().toISOString()
+    };
+    try {
+      await fetch(SHEETS_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(datos) });
+      setGuardado(true);
+      notificar("ok", "Informe guardado. Quedó bloqueado para evitar duplicados.");
+    } catch {
+      candado.current = false; // si falló, se permite reintentar
+      notificar("error", "No se pudo enviar. Revisa tu conexión (o abre la app desde el archivo HTML).");
+    } finally { setEnviando(false); }
+  };
+
+  const limpiar = () => { fotos.forEach(p => URL.revokeObjectURL(p.url)); setFotos([]); setF(INICIAL); setIntento(false); setGuardado(false); candado.current = false; setConfirmar(false); notificar("ok", "Formulario limpio. Listo para un nuevo reporte."); };
+
+  const togglePax = k => setF(p => ({ ...p, pax: { ...p.pax, [k]: p.pax[k] === null ? "" : null } }));
+
+  return (
+    <div className="mx-auto min-h-screen max-w-md bg-gray-50 pb-10 pt-3 sm:pt-0 sm:my-6 sm:min-h-0 sm:overflow-hidden sm:rounded-[2rem] sm:shadow-2xl sm:ring-1 sm:ring-pino-900/10">
+      {/* Encabezado */}
+      <header className="relative overflow-hidden rounded-t-[2rem] bg-[#0b6b3b] px-6 pb-9 pt-9 text-white" style={{fontFamily:"'Figtree', system-ui, sans-serif"}}>
+        <svg aria-hidden="true" className="no-select absolute right-[-22%] top-1/2 h-[125%] -translate-y-1/2" viewBox="0 0 200 200">
+          <circle cx="100" cy="100" r="100" fill="#ffffff" fillOpacity="0.10" />
+          <polygon fill="#0b6b3b" points="100,14 120.2,72.2 181.8,73.4 132.7,110.6 150.5,169.6 100,134.4 49.5,169.6 67.3,110.6 18.2,73.4 79.8,72.2" />
+        </svg>
+        <div className="relative">
+          <p className="flex items-center gap-2.5 text-[13px] font-bold uppercase tracking-[0.08em] text-[#5ed6a0]">
+            Grupo Estrella Blanca <span className="h-2 w-2 rounded-full bg-[#1fbf7a]"></span>
+          </p>
+          <h1 className="mt-2.5 text-[27px] font-bold leading-[1.25] tracking-[-0.01em]">Informe para solicitar folio de seguridad</h1>
+          <p className="mt-2 text-[15px] text-white/80">Gestión y alta automatizada de accidentes e incidencias</p>
+        </div>
+      </header>
+
+      <main className="space-y-5 bg-gray-50 px-4 pt-5">
+        <ErroresCtx.Provider value={intento ? faltantes : {}}>
+        <section className="relative space-y-5 rounded-3xl bg-white/80 p-5 shadow-lg ring-1 ring-pino-900/5 backdrop-blur">
+          <Campo n="1" label="Eco">
+            <input className={inputCls} inputMode="numeric" placeholder="Ej. 14516" value={f.eco} onChange={e=>set("eco", e.target.value)} />
+          </Campo>
+
+          <Campo n="2" label="Línea">
+            <Select value={f.linea} onChange={v=>set("linea", v)} placeholder="Selecciona la línea">
+              {LINEAS.map(l => <option key={l} value={l}>{l}</option>)}
+              <option value={OTRO}>Otro (especificar)</option>
+            </Select>
+            {f.linea === OTRO && <input autoFocus className={inputCls + " mt-2"} placeholder="Especifica la línea" value={f.lineaOtro} onChange={e=>set("lineaOtro", e.target.value)} />}
+          </Campo>
+
+          <Campo n="3" label="Operador1">
+            <input className={inputCls} placeholder="Ej. Luis Manuel Alegría García Clv. 108641" value={f.operador} onChange={e=>set("operador", e.target.value)} />
+            {f.conOperador2 ? (
+              <div className="mt-2 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[13px] font-semibold text-pino-900">Operador2</span>
+                  <button type="button" onClick={()=>setF(p=>({ ...p, conOperador2:false, operador2:"", estOp2:"" }))}
+                    className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50">✕ Quitar</button>
+                </div>
+                <input autoFocus className={inputCls} placeholder="Nombre y clave del segundo operador" value={f.operador2} onChange={e=>set("operador2", e.target.value)} />
+              </div>
+            ) : (
+              <button type="button" onClick={()=>set("conOperador2", true)}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-esmeralda-500/40 py-2.5 text-sm font-semibold text-esmeralda-600 hover:bg-esmeralda-50">
+                <span className="text-lg leading-none">+</span> Agregar Operador2
+              </button>
+            )}
+          </Campo>
+
+          <Campo n="4" label="Horario y Corrida">
+            <div className="grid grid-cols-[110px_1fr] gap-2">
+              <BuscadorHora value={f.horario} onChange={v=>set("horario", v)} />
+              <input className={inputCls} placeholder="Ej. Aguascalientes - CDMX" value={f.corrida} onChange={e=>set("corrida", e.target.value)} />
+            </div>
+          </Campo>
+
+          <Campo n="5" label="Tipo de Accidente">
+            <Select value={f.tipo} onChange={v=>set("tipo", v)} placeholder="Selecciona el tipo">
+              {TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
+              <option value={OTRO}>Otro (especificar)</option>
+            </Select>
+            {f.tipo === OTRO && <input autoFocus className={inputCls + " mt-2"} placeholder="Especifica el tipo de accidente" value={f.tipoOtro} onChange={e=>set("tipoOtro", e.target.value)} />}
+          </Campo>
+
+          <Campo n="6" label="Pasajeros">
+            <div className="mb-2 flex items-center gap-3 rounded-xl border border-esmeralda-100 bg-white px-3.5 py-2.5 shadow-sm">
+              <span className="flex-1 text-sm font-semibold text-pino-900">Total de pasajeros</span>
+              <input type="number" min="0" inputMode="numeric" placeholder="0"
+                className="w-24 rounded-lg border border-esmeralda-100 bg-esmeralda-50 px-3 py-2 text-right text-[15px] font-bold text-pino-900 focus:border-esmeralda-500 focus:outline-none focus:ring-2 focus:ring-esmeralda-500/30"
+                value={f.paxTotal} onChange={e=>set("paxTotal", e.target.value.replace(/[^0-9]/g,""))} />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {PAX.map(p => {
+                const on = f.pax[p.key] !== null;
+                return (
+                  <button type="button" key={p.key} onClick={()=>togglePax(p.key)}
+                    className={"flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm font-semibold transition " + (on ? p.on : "border-gray-200 bg-white text-gray-600")}>
+                    <span className={"grid h-4 w-4 place-items-center rounded border text-[10px] " + (on ? "border-white/70" : "border-gray-300")}>{on ? "✓" : ""}</span>{p.label}
+                  </button>
+                );
+              })}
+            </div>
+            {PAX.some(p => f.pax[p.key] !== null) && (
+              <div className="mt-2 space-y-2">
+                {PAX.filter(p => f.pax[p.key] !== null).map(p => (
+                  <div key={p.key} className="flex items-center gap-3 rounded-xl bg-esmeralda-50 px-3 py-2">
+                    <span className="flex-1 text-sm font-medium text-pino-900">{p.label}</span>
+                    <input type="number" min="0" inputMode="numeric" placeholder="0"
+                      className="w-24 rounded-lg border border-esmeralda-100 bg-white px-3 py-2 text-right text-[15px] font-semibold focus:border-esmeralda-500 focus:outline-none focus:ring-2 focus:ring-esmeralda-500/30"
+                      value={f.pax[p.key]} onChange={e=>setF(prev => ({ ...prev, pax: { ...prev.pax, [p.key]: e.target.value.replace(/[^0-9]/g,"") } }))} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {f.paxTotal !== "" && hayDetalle && sumaPax !== parseInt(f.paxTotal) && (
+              <p className="mt-1.5 text-xs font-medium text-amber-600">La suma de las categorías ({sumaPax}) no coincide con el total ({f.paxTotal}).</p>
+            )}
+            <div className="mt-3 rounded-xl border border-esmeralda-100 bg-white p-3 shadow-sm">
+              <p className="mb-2 flex items-center gap-1.5 text-[13px] font-bold text-pino-900">
+                <svg className="h-4 w-4 text-pino-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg>
+                Estado de los operadores
+              </p>
+              {[["estOp1","Operador1", true], ["estOp2","Operador2", f.conOperador2]].filter(x=>x[2]).map(([k, nombre]) => (
+                <div key={k} className="mb-2 last:mb-0">
+                  <span className="mb-1 block text-xs font-semibold text-gray-500">{nombre}</span>
+                  <div className="grid grid-cols-3 gap-1 rounded-xl bg-gray-100 p-1">
+                    {ESTADOS_OP.map(e => (
+                      <button type="button" key={e.v} onClick={()=>set(k, f[k] === e.v ? "" : e.v)}
+                        className={"rounded-lg py-2 text-[13px] font-semibold transition " + (f[k] === e.v ? e.on + " shadow" : "text-gray-600 hover:bg-white")}>{e.v}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {hayResumen && (
+              <div className="mt-3 overflow-hidden rounded-xl bg-pino-900 text-white shadow">
+                <div className="flex items-center justify-between px-4 py-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-esmeralda-100/80">Total de personas</p>
+                    <p className="text-xs text-white/70">{basePax} {basePax===1?"pasajero":"pasajeros"} + {opsActivos.length} {opsActivos.length===1?"operador":"operadores"}</p>
+                  </div>
+                  <span className="text-3xl font-extrabold">{totalPersonas}</span>
+                </div>
+                <div className="grid grid-cols-3 divide-x divide-white/10 border-t border-white/10 text-center">
+                  {porEstado.map(([l,n]) => (
+                    <div key={l} className="py-2">
+                      <p className="text-lg font-bold">{n}</p>
+                      <p className="text-[11px] text-esmeralda-100/80">{l}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Campo>
+
+          <Campo n="7" label="Fecha y Hora del Accidente">
+            <SelectorFecha value={f.fecha} onChange={d=>set("fecha", d)} />
+            <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <Select value={f.hora} onChange={v=>set("hora", v)} placeholder="Hora (HH)">
+                {HORAS.map(h => <option key={h} value={h}>{h}</option>)}
+              </Select>
+              <span className="text-lg font-bold text-pino-800">:</span>
+              <Select value={f.minuto} onChange={v=>set("minuto", v)} placeholder="Min (MM)">
+                {MINS.map(m => <option key={m} value={m}>{m}</option>)}
+              </Select>
+            </div>
+          </Campo>
+
+          <Campo n="8" label="Ubicación">
+            <input className={inputCls} placeholder="Ej. Km 45 Autopista México – Querétaro" value={f.ubicacion} onChange={e=>set("ubicacion", e.target.value)} />
+            <span className="mt-2 block text-xs font-semibold text-gray-500">Coordenadas (opcional)</span>
+            <div className="flex gap-2">
+              <input className={inputCls + " font-mono text-[14px]"} inputMode="decimal" placeholder="19.432608, -99.133209 o enlace de Maps" value={f.coordenadas} onChange={e=>set("coordenadas", e.target.value)} />
+              <button type="button" onClick={()=>setAvisoGps(true)} disabled={buscandoGps}
+                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-pino-800 px-3.5 text-sm font-semibold text-white shadow-sm hover:bg-pino-700 disabled:opacity-60">
+                {buscandoGps
+                  ? <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity=".3" strokeWidth="3"/><path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
+                  : <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>}
+                GPS
+              </button>
+            </div>
+            <p className="text-[11px] leading-snug text-gray-400">📍 Usa <b>GPS</b> solo si estás en el lugar del accidente. Si no, pega las coordenadas o el enlace de Google Maps que te comparta quien está ahí.</p>
+            {f.coordenadas.trim() && !coordsOk && <p className="text-xs text-amber-600">No se reconocen. Usa latitud, longitud (ej. 19.432608, -99.133209). Los enlaces cortos (maps.app.goo.gl) no traen coordenadas: ábrelos y copia los números.</p>}
+            {coordsOk && f.coordenadas.trim() !== coordsOk.txt && <p className="text-xs text-gray-500">Se usará: <span className="font-mono">{coordsOk.txt}</span></p>}
+            {coordsOk && <a href={`https://maps.google.com/?q=${coordsOk.lat},${coordsOk.lng}`} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-xs font-semibold text-esmeralda-600 underline">Ver en Google Maps ↗</a>}
+          </Campo>
+
+          <Campo n="9" label="Observaciones">
+            <textarea rows={5} className={inputCls + " resize-y"} placeholder="Describe lo ocurrido…" value={f.observaciones} onChange={e=>set("observaciones", e.target.value)} />
+          </Campo>
+
+          <Campo n="10" label="Fotografías (opcional, máx. 3)">
+            <input ref={entradaFotos} type="file" accept="image/*" multiple className="hidden" onChange={e=>agregarFotos(e.target.files)} />
+            <div className="grid grid-cols-3 gap-2">
+              {fotos.map((p, i) => (
+                <div key={p.id} className="relative aspect-square overflow-hidden rounded-xl bg-gray-100 shadow-sm ring-1 ring-esmeralda-100">
+                  <img src={p.url} alt={`Foto ${i + 1}`} className="h-full w-full object-cover" />
+                  <span className="absolute left-1.5 top-1.5 rounded-full bg-black/55 px-1.5 text-[11px] font-bold text-white">{i + 1}</span>
+                  <button type="button" onClick={()=>quitarFoto(p.id)} aria-label="Quitar foto"
+                    className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-red-600 text-xs font-bold text-white shadow">✕</button>
+                </div>
+              ))}
+              {fotos.length < MAX_FOTOS && (
+                <button type="button" onClick={()=>entradaFotos.current && entradaFotos.current.click()} disabled={procesandoFotos}
+                  className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-esmeralda-500/40 bg-white text-esmeralda-600 hover:bg-esmeralda-50 disabled:opacity-60">
+                  {procesandoFotos
+                    ? <svg className="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity=".3" strokeWidth="3"/><path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
+                    : <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>}
+                  <span className="text-[11px] font-semibold">{procesandoFotos ? "Procesando…" : "Agregar foto"}</span>
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-400">Toma la foto con la cámara o elígela de la galería. {fotos.length}/{MAX_FOTOS}</p>
+          </Campo>
+        </section>
+        </ErroresCtx.Provider>
+
+        {/* Vista previa */}
+        <section className="overflow-hidden rounded-3xl bg-white shadow-lg ring-1 ring-pino-900/5">
+          <div className="flex items-center justify-between bg-pino-900 px-5 py-3">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-white">Vista Previa del Informe</h2>
+            <span className="flex items-center gap-1.5 text-[11px] text-esmeralda-100"><span className="h-2 w-2 animate-pulse rounded-full bg-esmeralda-500"></span>En vivo</span>
+          </div>
+          <div className="space-y-1.5 px-5 py-4 text-[14.5px] leading-relaxed text-gray-800">
+            <p className="mb-3 font-bold text-pino-900">Informe para solicitar folio de seguridad</p>
+            {filas.map(([l, v]) => (
+              <p key={l} className="whitespace-pre-wrap break-words"><b className="font-bold text-pino-900">{l}</b> {v ? v : <span className="text-gray-300">—</span>}</p>
+            ))}
+          </div>
+        </section>
+
+        {/* Acciones */}
+        <section className="space-y-2.5">
+          <button onClick={compartir} className={"flex w-full items-center justify-center gap-2 rounded-2xl " + (numFaltantes > 0 ? "bg-esmeralda-600/60 " : "bg-esmeralda-600 ") + "py-4 text-[15px] font-bold text-white shadow-lg shadow-esmeralda-600/30 active:scale-[0.98] hover:bg-esmeralda-500"}>
+            {numFaltantes > 0 && <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>}
+            {numFaltantes === 0 && <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>}
+            Compartir{numFaltantes > 0 && <span className="ml-1 rounded-full bg-white/25 px-2 py-0.5 text-xs">faltan {numFaltantes}</span>}
+          </button>
+          <button onClick={copiar} className="mx-auto -mt-1 flex items-center gap-1.5 py-1.5 text-[13px] font-semibold text-pino-700 hover:text-esmeralda-600">
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
+            Solo copiar texto
+          </button>
+          <button onClick={guardar} disabled={enviando || guardado}
+            className={"flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-[15px] font-bold shadow-lg active:scale-[0.98] disabled:active:scale-100 " +
+              (guardado ? "cursor-not-allowed bg-gray-200 text-gray-500 shadow-none" : (numFaltantes > 0 ? "bg-pino-900/60 " : "bg-pino-900 ") + "text-white shadow-pino-900/30 hover:bg-pino-800 disabled:opacity-60")}>
+            {enviando
+              ? <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity=".3" strokeWidth="3"/><path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
+              : (guardado || numFaltantes > 0)
+                ? <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+                : <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>}
+            {enviando ? "Guardando…" : guardado ? "Guardado" : "Guardar"}
+            {!enviando && !guardado && numFaltantes > 0 && <span className="ml-1 rounded-full bg-white/25 px-2 py-0.5 text-xs">faltan {numFaltantes}</span>}
+          </button>
+          {guardado && <p className="-mt-1 text-center text-xs text-gray-500">Este informe ya se envió. Para capturar otro, usa "Limpiar formulario".</p>}
+          <button onClick={()=>setConfirmar(true)} className="w-full rounded-2xl border-2 border-pino-800/20 bg-white py-3.5 text-[15px] font-semibold text-pino-800 active:scale-[0.98] hover:bg-esmeralda-50">
+            Limpiar formulario
+          </button>
+        </section>
+      </main>
+
+      {avisoGps && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={()=>setAvisoGps(false)}>
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl" onClick={e=>e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-pino-900">¿Estás en el lugar del accidente?</h3>
+            <p className="mt-1 text-sm text-gray-500">El GPS toma la ubicación de <b>este teléfono</b>. Si no estás en el sitio, las coordenadas serían incorrectas; mejor pega las que te compartan.</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button onClick={()=>setAvisoGps(false)} className="rounded-xl border border-gray-200 py-3 font-semibold text-gray-600">No, cancelar</button>
+              <button onClick={()=>{ setAvisoGps(false); usarGps(); }} className="rounded-xl bg-pino-900 py-3 font-semibold text-white">Sí, usar GPS</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmar && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={()=>setConfirmar(false)}>
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl" onClick={e=>e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-pino-900">¿Limpiar el formulario?</h3>
+            <p className="mt-1 text-sm text-gray-500">Se borrarán todos los campos para iniciar un reporte nuevo.</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button onClick={()=>setConfirmar(false)} className="rounded-xl border border-gray-200 py-3 font-semibold text-gray-600">Cancelar</button>
+              <button onClick={limpiar} className="rounded-xl bg-pino-900 py-3 font-semibold text-white">Sí, limpiar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {aviso && (
+        <div className="fixed inset-x-0 bottom-5 z-50 flex justify-center px-4">
+          <div className={"flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white shadow-2xl " + (aviso.tipo === "ok" ? "bg-esmeralda-600" : "bg-red-600")}>
+            <span className="grid h-5 w-5 place-items-center rounded-full bg-white/25 text-xs">{aviso.tipo === "ok" ? "✓" : "!"}</span>{aviso.texto}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
