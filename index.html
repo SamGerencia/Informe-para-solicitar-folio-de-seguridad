@@ -30,7 +30,7 @@ const { useState, useMemo, useRef, useEffect } = React;
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbw2FsJbJL2TqafvCm91Z0PnLp7oLOdJXXV5TOR0r5xDhYshQZXlBFriXYP78A-6p3Yr/exec";
 
 const LINEAS = ["ABC","AGUILA","AVEC","CONEXIÓN","ELITE","ESTE","FILIALES","FUTURA","GOLFO","NAYARIT","NORESTE","NORESTE-ESTE","NORTE","ORIENTE","PACÍFICO CENTRO","PACÍFICO SUR","VALLE DE GUADIANA"];
-const TIPOS = ["Vandalismo","Golpe Con Objeto","Daños Fascia","Ventanas","Apedreamiento","Cuerno Izquierdo","Cuerno Derecho","Mecánico","Neumático","Neumático Con Objeto","Pantallas","Semoviente"];
+const TIPOS = ["Apedreamiento","Cambio De Parabrisas","Cuerno Derecho","Cuerno Izquierdo","Daños Fascia","Golpe Con Objeto","Mecánico","Neumático","Neumático Con Objeto","Pantallas","Semoviente","Vandalismo","Ventanas"];
 const OTRO = "__otro__";
 const PAX = [
   { key:"sinLesiones", label:"Sin lesiones", on:"bg-esmeralda-600 border-esmeralda-600 text-white" },
@@ -266,9 +266,6 @@ function App() {
     ...(f.conOperador2 ? [["Operador2:", op2Txt]] : []),
     ["Horario y Corrida:", horarioCorrida],
     ["Tipo de Accidente:", tipo],
-    ["Pasajeros:", paxTxt],
-    ...(estOpTxt ? [["Estado de operadores:", estOpTxt]] : []),
-    ...(totalTxt ? [["Total de personas:", totalTxt]] : []),
     ["Fecha y Hora del Accidente:", fechaHora],
     ["Ubicación:", f.ubicacion.trim()],
     ...(coordsOk ? [["Coordenadas:", `${coordsOk.txt} https://maps.google.com/?q=${coordsOk.lat},${coordsOk.lng}`]] : []),
@@ -294,22 +291,13 @@ function App() {
   }
   if (!f.horario || !f.corrida.trim()) faltantes["4"] = !f.horario && !f.corrida.trim() ? "Falta el horario y la corrida" : !f.horario ? "Falta el horario" : "Falta la corrida (origen - destino)";
   if (!tipo) faltantes["5"] = f.tipo === OTRO ? "Especifica el tipo de accidente" : "Selecciona el tipo de accidente";
-  {
-    const m = [];
-    if (f.paxTotal === "") m.push("el total de pasajeros");
-    if (!PAX.some(p => f.pax[p.key] !== null)) m.push("marcar al menos una categoría");
-    PAX.forEach(p => { if (f.pax[p.key] === "") m.push(`la cantidad de "${p.label}"`); });
-    if (!f.estOp1) m.push("el estado del Operador1");
-    if (f.conOperador2 && !f.estOp2) m.push("el estado del Operador2");
-    if (m.length) faltantes["6"] = "Falta " + m.join(", ");
-  }
-  if (!f.fecha || !f.hora || !f.minuto) faltantes["7"] = !f.fecha ? "Selecciona la fecha del accidente" + (!f.hora || !f.minuto ? " y la hora" : "") : "Selecciona la hora y los minutos";
+  if (!f.fecha || !f.hora || !f.minuto) faltantes["6"] = !f.fecha ? "Selecciona la fecha del accidente" + (!f.hora || !f.minuto ? " y la hora" : "") : "Selecciona la hora y los minutos";
   const coordsMal = f.coordenadas.trim() && !coordsOk;
-  if (!f.ubicacion.trim() || coordsMal) faltantes["8"] =
+  if (!f.ubicacion.trim() || coordsMal) faltantes["7"] =
     !f.ubicacion.trim() ? "Falta la descripción de la ubicación" + (coordsMal ? " y corregir las coordenadas" : "")
     : "Coordenadas no válidas. Pega latitud, longitud (19.432608, -99.133209) o borra el campo";
-  if (!f.atiende.trim()) faltantes["9"] = "Captura quién atiende";
-  if (!f.observaciones.trim()) faltantes["10"] = "Escribe las observaciones";
+  if (!f.atiende.trim()) faltantes["8"] = "Captura quién atiende";
+  if (!f.observaciones.trim()) faltantes["9"] = "Escribe las observaciones";
   const numFaltantes = Object.keys(faltantes).length;
 
   const validar = () => {
@@ -396,8 +384,7 @@ function App() {
       nombreOperador2: f.conOperador2 ? f.operador2.trim() : "", claveOperador2: f.conOperador2 ? f.claveOp2.trim() : "",
       horario: f.horario, corrida: f.corrida.trim(), horarioCorrida,
       tipoAccidente: tipo,
-      pasajerosSinLesiones: f.pax.sinLesiones ?? "", pasajerosLesionados: f.pax.lesionados ?? "", pasajerosFinados: f.pax.finados ?? "",
-      pasajerosTotal: f.paxTotal, estadoOperador1: f.estOp1, estadoOperador2: f.conOperador2 ? f.estOp2 : "", estadoOperadores: estOpTxt, totalPersonas: hayResumen ? totalPersonas : "", totalSinLesiones: porEstado[0][1], totalLesionados: porEstado[1][1], totalFinados: porEstado[2][1], totalPersonasTexto: totalTxt, pasajeros: paxTxt, fechaAccidente: fechaTxt, horaAccidente: horaTxt, fechaHoraAccidente: fechaHora,
+      fechaAccidente: fechaTxt, horaAccidente: horaTxt, fechaHoraAccidente: fechaHora,
       ubicacion: f.ubicacion.trim(), coordenadas: coordsOk ? coordsOk.txt : "",
       mapa: coordsOk ? `https://maps.google.com/?q=${coordsOk.lat},${coordsOk.lng}` : "",
       atiende: f.atiende.trim(),
@@ -489,78 +476,7 @@ function App() {
             {f.tipo === OTRO && <input autoFocus className={inputCls + " mt-2"} placeholder="Especifica el tipo de accidente" value={f.tipoOtro} onChange={e=>set("tipoOtro", e.target.value)} />}
           </Campo>
 
-          <Campo n="6" label="Pasajeros">
-            <div className="mb-2 flex items-center gap-3 rounded-xl border border-esmeralda-100 bg-white px-3.5 py-2.5 shadow-sm">
-              <span className="flex-1 text-sm font-semibold text-pino-900">Total de pasajeros</span>
-              <input type="number" min="0" inputMode="numeric" placeholder="0"
-                className="w-24 rounded-lg border border-esmeralda-100 bg-esmeralda-50 px-3 py-2 text-right text-[15px] font-bold text-pino-900 focus:border-esmeralda-500 focus:outline-none focus:ring-2 focus:ring-esmeralda-500/30"
-                value={f.paxTotal} onChange={e=>set("paxTotal", e.target.value.replace(/[^0-9]/g,""))} />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {PAX.map(p => {
-                const on = f.pax[p.key] !== null;
-                return (
-                  <button type="button" key={p.key} onClick={()=>togglePax(p.key)}
-                    className={"flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm font-semibold transition " + (on ? p.on : "border-gray-200 bg-white text-gray-600")}>
-                    <span className={"grid h-4 w-4 place-items-center rounded border text-[10px] " + (on ? "border-white/70" : "border-gray-300")}>{on ? "✓" : ""}</span>{p.label}
-                  </button>
-                );
-              })}
-            </div>
-            {PAX.some(p => f.pax[p.key] !== null) && (
-              <div className="mt-2 space-y-2">
-                {PAX.filter(p => f.pax[p.key] !== null).map(p => (
-                  <div key={p.key} className="flex items-center gap-3 rounded-xl bg-esmeralda-50 px-3 py-2">
-                    <span className="flex-1 text-sm font-medium text-pino-900">{p.label}</span>
-                    <input type="number" min="0" inputMode="numeric" placeholder="0"
-                      className="w-24 rounded-lg border border-esmeralda-100 bg-white px-3 py-2 text-right text-[15px] font-semibold focus:border-esmeralda-500 focus:outline-none focus:ring-2 focus:ring-esmeralda-500/30"
-                      value={f.pax[p.key]} onChange={e=>setF(prev => ({ ...prev, pax: { ...prev.pax, [p.key]: e.target.value.replace(/[^0-9]/g,"") } }))} />
-                  </div>
-                ))}
-              </div>
-            )}
-            {f.paxTotal !== "" && hayDetalle && sumaPax !== parseInt(f.paxTotal) && (
-              <p className="mt-1.5 text-xs font-medium text-amber-600">La suma de las categorías ({sumaPax}) no coincide con el total ({f.paxTotal}).</p>
-            )}
-            <div className="mt-3 rounded-xl border border-esmeralda-100 bg-white p-3 shadow-sm">
-              <p className="mb-2 flex items-center gap-1.5 text-[13px] font-bold text-pino-900">
-                <svg className="h-4 w-4 text-pino-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg>
-                Estado de los operadores
-              </p>
-              {[["estOp1","Operador1", true], ["estOp2","Operador2", f.conOperador2]].filter(x=>x[2]).map(([k, nombre]) => (
-                <div key={k} className="mb-2 last:mb-0">
-                  <span className="mb-1 block text-xs font-semibold text-gray-500">{nombre}</span>
-                  <div className="grid grid-cols-3 gap-1 rounded-xl bg-gray-100 p-1">
-                    {ESTADOS_OP.map(e => (
-                      <button type="button" key={e.v} onClick={()=>set(k, f[k] === e.v ? "" : e.v)}
-                        className={"rounded-lg py-2 text-[13px] font-semibold transition " + (f[k] === e.v ? e.on + " shadow" : "text-gray-600 hover:bg-white")}>{e.v}</button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {hayResumen && (
-              <div className="mt-3 overflow-hidden rounded-xl bg-pino-900 text-white shadow">
-                <div className="flex items-center justify-between px-4 py-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-esmeralda-100/80">Total de personas</p>
-                    <p className="text-xs text-white/70">{basePax} {basePax===1?"pasajero":"pasajeros"} + {opsActivos.length} {opsActivos.length===1?"operador":"operadores"}</p>
-                  </div>
-                  <span className="text-3xl font-extrabold">{totalPersonas}</span>
-                </div>
-                <div className="grid grid-cols-3 divide-x divide-white/10 border-t border-white/10 text-center">
-                  {porEstado.map(([l,n]) => (
-                    <div key={l} className="py-2">
-                      <p className="text-lg font-bold">{n}</p>
-                      <p className="text-[11px] text-esmeralda-100/80">{l}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </Campo>
-
-          <Campo n="7" label="Fecha y Hora del Accidente">
+          <Campo n="6" label="Fecha y Hora del Accidente">
             <SelectorFecha value={f.fecha} onChange={d=>set("fecha", d)} />
             <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <Select value={f.hora} onChange={v=>set("hora", v)} placeholder="Hora (HH)">
@@ -573,7 +489,7 @@ function App() {
             </div>
           </Campo>
 
-          <Campo n="8" label="Ubicación">
+          <Campo n="7" label="Ubicación">
             <input className={inputCls} placeholder="Ej. Km 45 Autopista México – Querétaro" value={f.ubicacion} onChange={e=>set("ubicacion", e.target.value)} />
             <span className="mt-2 block text-xs font-semibold text-gray-500">Coordenadas (opcional)</span>
             <div className="flex gap-2">
@@ -592,15 +508,15 @@ function App() {
             {coordsOk && <a href={`https://maps.google.com/?q=${coordsOk.lat},${coordsOk.lng}`} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-xs font-semibold text-esmeralda-600 underline">Ver en Google Maps ↗</a>}
           </Campo>
 
-          <Campo n="9" label="Atiende">
+          <Campo n="8" label="Atiende">
             <input className={inputCls} placeholder="Nombre de quien atiende" value={f.atiende} onChange={e=>set("atiende", e.target.value)} />
           </Campo>
 
-          <Campo n="10" label="Observaciones">
+          <Campo n="9" label="Observaciones">
             <textarea rows={5} className={inputCls + " resize-y"} placeholder="Describe lo ocurrido…" value={f.observaciones} onChange={e=>set("observaciones", e.target.value)} />
           </Campo>
 
-          <Campo n="11" label="Fotografías (opcional, máx. 3)">
+          <Campo n="10" label="Fotografías (opcional, máx. 3)">
             <input ref={entradaFotos} type="file" accept="image/*" multiple className="hidden" onChange={e=>agregarFotos(e.target.files)} />
             <div className="grid grid-cols-3 gap-2">
               {fotos.map((p, i) => (
