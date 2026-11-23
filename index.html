@@ -218,6 +218,7 @@ function App() {
   const [aviso, setAviso] = useState(null);
   const [enviando, setEnviando] = useState(false);
   const [guardado, setGuardado] = useState(false);
+  const [registro, setRegistro] = useState(null); // { id, liga } que devuelve Apps Script al guardar
   const [fotos, setFotos] = useState([]);
   const [procesandoFotos, setProcesandoFotos] = useState(false);
   const [buscandoGps, setBuscandoGps] = useState(false);
@@ -275,7 +276,10 @@ function App() {
   ];
 
   const textoWhatsApp = () =>
-    "*Informe para solicitar folio de seguridad*\n\n" + filas.map(([l, v]) => `*${l}* ${v}`).join("\n");
+    "*Informe para solicitar folio de seguridad*\n" +
+    `🔒 *ID:* ${registro ? registro.id : "—"} · Registrado en sistema\n\n` +
+    filas.map(([l, v]) => `*${l}* ${v}`).join("\n") +
+    (registro ? `\n\n🔗 *Verificar registro:* ${registro.liga}` : "");
 
   const [intento, setIntento] = useState(false);
   const faltantes = {};
@@ -296,7 +300,14 @@ function App() {
   if (!f.ubicacion.trim() || coordsMal) faltantes["7"] =
     !f.ubicacion.trim() ? "Falta la descripción de la ubicación" + (coordsMal ? " y corregir las coordenadas" : "")
     : "Coordenadas no válidas. Pega latitud, longitud (19.432608, -99.133209) o borra el campo";
-  if (!f.atiende.trim()) faltantes["8"] = "Captura quién atiende";
+  {
+    // Candado: nombre y apellido reales (solo letras, mínimo 2 palabras de 2+ letras)
+    const nom = f.atiende.trim().replace(/\s+/g, " ");
+    const palabras = nom ? nom.split(" ") : [];
+    if (!nom) faltantes["8"] = "Escribe tu nombre y apellido";
+    else if (/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ .'-]/.test(nom)) faltantes["8"] = "Usa solo letras en el nombre (sin números ni símbolos)";
+    else if (palabras.filter(w => w.replace(/[.'-]/g, "").length >= 2).length < 2) faltantes["8"] = "Escribe nombre y apellido completos (ej. Juan Pérez)";
+  }
   if (!f.observaciones.trim()) faltantes["9"] = "Escribe las observaciones";
   const numFaltantes = Object.keys(faltantes).length;
 
@@ -337,8 +348,15 @@ function App() {
   };
   const quitarFoto = id => setFotos(prev => { const p = prev.find(x => x.id === id); if (p) URL.revokeObjectURL(p.url); return prev.filter(x => x.id !== id); });
 
+  // El mensaje solo puede salir con ID: primero hay que guardar
+  const requiereRegistro = () => {
+    if (!validar()) return false;
+    if (!registro) { notificar("error", "Primero toca Guardar: así el informe obtiene su ID de registro."); return false; }
+    return true;
+  };
+
   const compartir = async () => {
-    if (!validar()) return;
+    if (!requiereRegistro()) return;
     const t = textoWhatsApp();
     if (fotos.length) {
       const archivos = fotos.map((p, i) => new File([p.blob], `Eco_${f.eco.trim() || "SN"}_foto${i + 1}.jpg`, { type: "image/jpeg" }));
@@ -361,7 +379,7 @@ function App() {
   };
 
   const copiar = async () => {
-    if (!validar()) return;
+    if (!requiereRegistro()) return;
     const t = textoWhatsApp();
     try { await navigator.clipboard.writeText(t); notificar("ok", "Copiado. Pégalo en WhatsApp."); }
     catch {
@@ -393,16 +411,20 @@ function App() {
       fechaRegistro: new Date().toISOString()
     };
     try {
-      await fetch(SHEETS_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(datos) });
+      // Se lee la respuesta de Apps Script para obtener el ID y la liga al renglón de la hoja
+      const r = await fetch(SHEETS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(datos) });
+      const j = await r.json();
+      if (!j || !j.ok || !j.id || !j.liga) throw new Error((j && j.error) || "Respuesta sin ID");
+      setRegistro({ id: j.id, liga: j.liga });
       setGuardado(true);
-      notificar("ok", "Informe guardado. Quedó bloqueado para evitar duplicados.");
+      notificar("ok", `Guardado con ID ${j.id}. Ahora toca Compartir.`);
     } catch {
       candado.current = false; // si falló, se permite reintentar
-      notificar("error", "No se pudo enviar. Revisa tu conexión (o abre la app desde el archivo HTML).");
+      notificar("error", "No se pudo confirmar el guardado. Revisa tu conexión e intenta de nuevo.");
     } finally { setEnviando(false); }
   };
 
-  const limpiar = () => { fotos.forEach(p => URL.revokeObjectURL(p.url)); setFotos([]); setF(INICIAL); setIntento(false); setGuardado(false); candado.current = false; setConfirmar(false); notificar("ok", "Formulario limpio. Listo para un nuevo reporte."); };
+  const limpiar = () => { fotos.forEach(p => URL.revokeObjectURL(p.url)); setFotos([]); setF(INICIAL); setIntento(false); setGuardado(false); setRegistro(null); candado.current = false; setConfirmar(false); notificar("ok", "Formulario limpio. Listo para un nuevo reporte."); };
 
   const togglePax = k => setF(p => ({ ...p, pax: { ...p.pax, [k]: p.pax[k] === null ? "" : null } }));
 
@@ -425,6 +447,8 @@ function App() {
 
       <main className="space-y-5 bg-gray-50 px-4 pt-5">
         <ErroresCtx.Provider value={intento ? faltantes : {}}>
+        {guardado && <p className="rounded-2xl bg-esmeralda-50 px-4 py-3 text-center text-xs font-semibold text-pino-800 ring-1 ring-esmeralda-100">🔒 Informe guardado: los datos ya no se pueden editar para que coincidan con el registro.</p>}
+        <fieldset disabled={guardado} className={"m-0 min-w-0 border-0 p-0 " + (guardado ? "opacity-70" : "")}>
         <section className="relative space-y-5 rounded-3xl bg-white/80 p-5 shadow-lg ring-1 ring-pino-900/5 backdrop-blur">
           <Campo n="1" label="Eco">
             <input className={inputCls} inputMode="numeric" placeholder="Ej. 14516" value={f.eco} onChange={e=>set("eco", e.target.value)} />
@@ -509,7 +533,8 @@ function App() {
           </Campo>
 
           <Campo n="8" label="Atiende">
-            <input className={inputCls} placeholder="Nombre de quien atiende" value={f.atiende} onChange={e=>set("atiende", e.target.value)} />
+            <input className={inputCls} placeholder="Nombre y apellido de quien atiende" autoComplete="name" value={f.atiende} onChange={e=>set("atiende", e.target.value)} />
+            <p className="text-[11px] text-gray-400">Obligatorio: nombre y apellido. Sin esto no se puede guardar ni compartir.</p>
           </Campo>
 
           <Campo n="9" label="Observaciones">
@@ -540,6 +565,7 @@ function App() {
             <p className="text-[11px] text-gray-400">Toma la foto con la cámara o elígela de la galería. {fotos.length}/{MAX_FOTOS}</p>
           </Campo>
         </section>
+        </fieldset>
         </ErroresCtx.Provider>
 
         {/* Vista previa */}
@@ -549,24 +575,21 @@ function App() {
             <span className="flex items-center gap-1.5 text-[11px] text-esmeralda-100"><span className="h-2 w-2 animate-pulse rounded-full bg-esmeralda-500"></span>En vivo</span>
           </div>
           <div className="space-y-1.5 px-5 py-4 text-[14.5px] leading-relaxed text-gray-800">
-            <p className="mb-3 font-bold text-pino-900">Informe para solicitar folio de seguridad</p>
+            <p className="font-bold text-pino-900">Informe para solicitar folio de seguridad</p>
+            <p className="mb-3"><b className="font-bold text-pino-900">🔒 ID:</b> {registro
+              ? <span className="font-mono font-bold text-esmeralda-600">{registro.id}</span>
+              : <span className="text-gray-400">se asigna al guardar</span>} <span className="text-gray-500">· Registrado en sistema</span></p>
             {filas.map(([l, v]) => (
               <p key={l} className="whitespace-pre-wrap break-words"><b className="font-bold text-pino-900">{l}</b> {v ? v : <span className="text-gray-300">—</span>}</p>
             ))}
+            <p className="mt-3 break-all"><b className="font-bold text-pino-900">🔗 Verificar registro:</b> {registro
+              ? <a href={registro.liga} target="_blank" rel="noopener" className="text-esmeralda-600 underline">{registro.liga}</a>
+              : <span className="text-gray-400">se genera al guardar</span>}</p>
           </div>
         </section>
 
         {/* Acciones */}
         <section className="space-y-2.5">
-          <button onClick={compartir} className={"flex w-full items-center justify-center gap-2 rounded-2xl " + (numFaltantes > 0 ? "bg-esmeralda-600/60 " : "bg-esmeralda-600 ") + "py-4 text-[15px] font-bold text-white shadow-lg shadow-esmeralda-600/30 active:scale-[0.98] hover:bg-esmeralda-500"}>
-            {numFaltantes > 0 && <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>}
-            {numFaltantes === 0 && <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>}
-            Compartir{numFaltantes > 0 && <span className="ml-1 rounded-full bg-white/25 px-2 py-0.5 text-xs">faltan {numFaltantes}</span>}
-          </button>
-          <button onClick={copiar} className="mx-auto -mt-1 flex items-center gap-1.5 py-1.5 text-[13px] font-semibold text-pino-700 hover:text-esmeralda-600">
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
-            Solo copiar texto
-          </button>
           <button onClick={guardar} disabled={enviando || guardado}
             className={"flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-[15px] font-bold shadow-lg active:scale-[0.98] disabled:active:scale-100 " +
               (guardado ? "cursor-not-allowed bg-gray-200 text-gray-500 shadow-none" : (numFaltantes > 0 ? "bg-pino-900/60 " : "bg-pino-900 ") + "text-white shadow-pino-900/30 hover:bg-pino-800 disabled:opacity-60")}>
@@ -578,7 +601,16 @@ function App() {
             {enviando ? "Guardando…" : guardado ? "Guardado" : "Guardar"}
             {!enviando && !guardado && numFaltantes > 0 && <span className="ml-1 rounded-full bg-white/25 px-2 py-0.5 text-xs">faltan {numFaltantes}</span>}
           </button>
-          {guardado && <p className="-mt-1 text-center text-xs text-gray-500">Este informe ya se envió. Para capturar otro, usa "Limpiar formulario".</p>}
+          {guardado && <p className="-mt-1 text-center text-xs text-gray-500">Guardado. Ahora toca <b>Compartir</b> para enviarlo por WhatsApp con su ID.</p>}
+          <button onClick={compartir} className={"flex w-full items-center justify-center gap-2 rounded-2xl " + (numFaltantes > 0 || !registro ? "bg-esmeralda-600/60 " : "bg-esmeralda-600 ") + "py-4 text-[15px] font-bold text-white shadow-lg shadow-esmeralda-600/30 active:scale-[0.98] hover:bg-esmeralda-500"}>
+            {(numFaltantes > 0 || !registro) && <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>}
+            {numFaltantes === 0 && registro && <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>}
+            Compartir{numFaltantes > 0 ? <span className="ml-1 rounded-full bg-white/25 px-2 py-0.5 text-xs">faltan {numFaltantes}</span> : !registro && <span className="ml-1 rounded-full bg-white/25 px-2 py-0.5 text-xs">primero guarda</span>}
+          </button>
+          <button onClick={copiar} className="mx-auto -mt-1 flex items-center gap-1.5 py-1.5 text-[13px] font-semibold text-pino-700 hover:text-esmeralda-600">
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
+            Solo copiar texto
+          </button>
           <button onClick={()=>setConfirmar(true)} className="w-full rounded-2xl border-2 border-pino-800/20 bg-white py-3.5 text-[15px] font-semibold text-pino-800 active:scale-[0.98] hover:bg-esmeralda-50">
             Limpiar formulario
           </button>
