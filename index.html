@@ -23,6 +23,33 @@ tailwind.config = { theme: { extend: { colors: {
 </style>
 </head>
 <body class="bg-white min-h-screen">
+<!-- Aviso de confirmación al abrir -->
+<style>
+  #aviso-app{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:18px}
+  #aviso-app .av-caja{width:100%;max-width:380px;background:#185FA5;color:#fff;border-radius:14px;text-align:center;padding:24px 18px}
+  #aviso-app .av-icono{display:inline-block;animation:avLate 1.1s infinite}
+  @keyframes avLate{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
+  #aviso-app button{display:block;width:100%;margin-top:10px;padding:12px;border-radius:9px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+<div id="aviso-app" role="dialog" aria-modal="true">
+  <div class="av-caja">
+    <span class="av-icono"><svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8.5-8 9.5C7.5 20.5 4 17 4 12V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg></span>
+    <p style="margin:8px 0 4px;font-size:16px;font-weight:700">¿Estás seguro de que vas a generar un</p>
+    <p style="margin:0 0 14px;font-size:22px;font-weight:700;line-height:1.25">INFORME PARA FOLIO DE SEGURIDAD?</p>
+    <button type="button" id="aviso-si" style="background:#fff;color:#0C447C;border:none">Sí, continuar</button>
+    <button type="button" id="aviso-no" style="background:transparent;color:#fff;border:1.5px solid #fff">No, llévame a informe de accidente</button>
+  </div>
+</div>
+<script>
+  (function(){
+    var av = document.getElementById('aviso-app');
+    if (false) { av.remove(); return; }
+    document.body.style.overflow = 'hidden';
+    document.getElementById('aviso-si').onclick = function(){ av.remove(); document.body.style.overflow = ''; };
+    document.getElementById('aviso-no').onclick = function(){ location.href = 'https://samgerencia.github.io/Informe-de-Accidente/'; };
+  })();
+</script>
+
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
 const { useState, useMemo, useRef, useEffect } = React;
