@@ -8,6 +8,8 @@
 <meta charset="UTF-8" />
 <meta name="copyright" content="2026 Gerencia de Seguridad Vial. Uso exclusivo interno. Prohibida su copia o modificación." />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
 <title>Informe para solicitar folio de seguridad</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
@@ -498,17 +500,14 @@ function App() {
   return (
     <div className="mx-auto min-h-screen max-w-md bg-gray-50 pb-10 pt-3 sm:pt-0 sm:my-6 sm:min-h-0 sm:overflow-hidden sm:rounded-[2rem] sm:shadow-2xl sm:ring-1 sm:ring-pino-900/10">
       {/* Encabezado */}
-      <header className="relative overflow-hidden rounded-t-[2rem] bg-gradient-to-br from-[#163F5E] via-[#1d5a7c] to-[#2D7993] px-6 pb-8 pt-9 text-white" style={{fontFamily:"'Figtree', system-ui, sans-serif"}}>
+      <header className="relative min-h-[184px] overflow-hidden rounded-t-[2rem] bg-gradient-to-br from-[#163F5E] via-[#1d5a7c] to-[#2D7993] px-6 pb-8 pt-9 text-white" style={{fontFamily:"'Figtree', system-ui, sans-serif"}}>
         <div aria-hidden="true" className="no-select absolute -bottom-10 left-[46%] h-[200%] w-3 rotate-[28deg] bg-[#5BB5C3]/70"></div>
-        <svg aria-hidden="true" className="no-select absolute right-[-22%] top-1/2 h-[125%] -translate-y-1/2" viewBox="0 0 200 200">
-          <path fill="#ffffff" fillOpacity="0.10" fillRule="evenodd"
-            d="M0,100 a100,100 0 1,0 200,0 a100,100 0 1,0 -200,0 Z M100,14 L120.2,72.2 L181.8,73.4 L132.7,110.6 L150.5,169.6 L100,134.4 L49.5,169.6 L67.3,110.6 L18.2,73.4 L79.8,72.2 Z" />
-        </svg>
+        <img src="icons/logo-sv-blanco.png" alt="" aria-hidden="true" draggable="false" className="no-select pointer-events-none absolute right-[1%] top-1/2 h-[80%] min-[420px]:h-[90%] -translate-y-1/2 opacity-[0.15]" />
         <div className="relative">
           <p className="flex items-center gap-2.5 text-[13px] font-bold uppercase tracking-[0.08em] text-[#8fd6e1]">
             Grupo Estrella Blanca <span className="h-2 w-2 rounded-full bg-[#5BB5C3]"></span>
           </p>
-          <h1 className="mt-2.5 text-[27px] font-bold leading-[1.25] tracking-[-0.01em]">Informe para solicitar folio de seguridad</h1>
+          <h1 className="mt-2.5 text-[23px] font-bold leading-[1.25] tracking-[-0.01em]">Informe para solicitar<br />folio de seguridad</h1>
         </div>
       </header>
 
